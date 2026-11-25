@@ -1,6 +1,6 @@
-# BLUE · Campus Lost & Found Intelligence
+# findyourloss · Campus Lost & Found
 
-“One campus. One platform. Every lost item finds its way home.” BLUE pairs campus lost and found reports using item category, colour, brand, campus location, report time, and description.
+“One campus. One platform. Every lost item finds its way home.” findyourloss pairs campus lost and found reports using item category, colour, brand, campus location, report time, and description.
 
 ## Run locally
 
@@ -12,7 +12,6 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 $env:USE_MOCK_DB="true"
-python seed.py
 uvicorn main:app --reload
 ```
 
@@ -24,16 +23,20 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Mock DB data lives in memory and the API process seeds itself on startup; `python seed.py` is also available for direct seed verification or MongoDB seeding. For persistent MongoDB, unset `USE_MOCK_DB` and set `MONGO_URI` (defaults to `mongodb://localhost:27017`). Set `VITE_API_URL` when the API is hosted elsewhere. API documentation is at http://localhost:8000/docs.
+Open http://localhost:5173. On first start the backend creates hidden sample candidates so a new report can demonstrate matching immediately. Sample candidates are excluded from Home, report lists, stats, and Insights; only real submissions appear there. They are labelled as demo suggestions and cannot be chatted with or marked reunited. With `USE_MOCK_DB=true`, all data clears when you stop the backend. For persistent MongoDB, unset `USE_MOCK_DB` and set `MONGO_URI` (defaults to `mongodb://localhost:27017`). Set `VITE_API_URL` when the API is hosted elsewhere. API documentation is at http://localhost:8000/docs.
 
 ## API
 
-- `POST /api/reports/lost` and `POST /api/reports/found` — create a report and return ranked open opposite-type matches. Pass `force: true` to submit a likely duplicate.
+- `POST /api/reports/lost` and `POST /api/reports/found` — create a report with optional building/floor/room and map pin coordinates, then return ranked open opposite-type matches. Pass `force: true` to submit a likely duplicate.
 - `GET /api/reports?type=&status=&place=&limit=` and `GET /api/reports/{report_id}` — list or read reports.
 - `GET /api/matches/{report_id}` — refresh matches.
-- `POST /api/reports/{report_id}/reunite` with `{"matched_with":"R002"}` — mark both reports reunited.
+- `GET/POST /api/reports/{report_id}/chat` — read/send meetup messages with a matched opposite report; messages remain available in Chat History. `POST /api/reports/{report_id}/reunite` with `{"matched_with":"R002"}` marks both reports reunited after the handoff.
 - `POST /api/upload` — save an image in `backend/uploads`.
-- `GET /api/stats`, `/api/insights`, `/api/locations`, `/api/alerts?report_id=R001` — dashboard, analytics, locations, and high probability matches.
+- `GET /api/stats`, `/api/insights`, `/api/locations`, `/api/buildings`, `/api/alerts?report_id=R001` — university-wide totals, location/day analytics, GLA map pins, and high probability matches.
+
+## Campus location pins
+
+The campus map is centered on the GLA University pin from the supplied Google Maps link (`27.60486, 77.5970753`). Nearby building and campus-area coordinates are approximate outdoor pins estimated from the supplied map image. The form allows a manual map click to adjust a pin; classroom-level indoor positions still need a verified floor plan.
 
 ## Matching
 
@@ -41,14 +44,14 @@ BLUE combines normalized category (25%), colour (15%), brand (10%), location (15
 
 ## Two-minute judge demo
 
-1. Open Home and point out the seeded activity, report statistics, and OpenStreetMap hotspot markers.
-2. Open Report Item. Submit a lost “Navy Bottle”, colour “Navy”, brand “Milton”, place “Library”, and a time close to now.
-3. Show the ranked Blue Water Flask candidate, score, and reason chips on Matching Results.
-4. Mark the candidate as reunited and return Home to show the updated counts.
-5. Open Insights to show item frequency, location and day charts, report status, and hotspot table.
+1. Open Home and show the clean dashboard with zero old reports.
+2. Open Report Item and submit a lost “Navy Bottle”, colour “Navy”, brand “Milton”, and place “Library”.
+3. Submit the corresponding found report in another browser/session; show the match and its reason chips.
+4. Open the chat from the match card, agree on a public campus meetup spot, then confirm the handoff.
+5. Open Insights to see counts update from reports made during this run.
 
 Seed generation is idempotent and produces exactly 150 fictional reports without personal identifiers. The matcher unit cases are in `backend/test_matching.py` (`pytest`).
 
 ## Current scope
 
-Included: FastAPI API, MongoDB/mongomock storage, seed data, duplicate warning, matching, reunite flow, image upload, stats and analytics, responsive React dashboard, charts, map, report form, and matching results. The alert endpoint is present; automatic navbar polling/toasts are not wired yet. Optional sentence-transformer embeddings fall back cleanly to RapidFuzz.
+Included: FastAPI API, MongoDB/mongomock storage, optional seed data, duplicate warning, matching, meetup chat, handoff confirmation, image upload, stats and analytics, responsive React dashboard, charts, map, report form, and matching results. Optional sentence-transformer embeddings fall back cleanly to RapidFuzz.

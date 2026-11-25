@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from matching import score_pair
+from matching import score_pair, normalize_category
 
 def pair(a,b):
     base={"time":datetime.now(timezone.utc),"place":"Library","description":"Campus item"}
@@ -15,3 +15,13 @@ def test_expected_pair_bands():
     base={"place":"Library"}
     weak=score_pair({**base,"item":"Red Notebook","colour":"Red","description":"Red notebook with lined pages","time":datetime.now(timezone.utc)-__import__('datetime').timedelta(days=10)}, {**base,"item":"Blue Notebook","colour":"Blue","description":"Blue notebook with a blank cover","time":datetime.now(timezone.utc)})[0]
     assert weak<=59
+
+def test_pen_and_misspelled_hoodie_categories_still_match():
+    assert normalize_category("Pen") == "Stationery"
+    assert normalize_category("hoddie") == "Clothing"
+    now=datetime.now(timezone.utc)
+    base={"place":"Classroom","time":now,"description":"Found around campus"}
+    pen_score=score_pair({**base,"item":"Pen","category":"Other","colour":"Black"},{**base,"item":"Black Ballpoint Pen","category":"Other","colour":"Black"})[0]
+    hoodie_score=score_pair({**base,"item":"hoddie","category":"Other","colour":"Grey"},{**base,"item":"Grey Jacket","category":"Clothing","colour":"Gray"})[0]
+    assert pen_score>=60
+    assert hoodie_score>=60

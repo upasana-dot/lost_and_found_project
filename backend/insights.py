@@ -1,10 +1,10 @@
 import pandas as pd
 from datetime import datetime
-from main import LOCATIONS
 from db import reports
+from locations import LOCATIONS
 
 def build_insights():
-    rows=list(reports.find({}, {"_id":0}))
+    rows=list(reports.find({"is_demo":{"$ne":True}}, {"_id":0}))
     df=pd.DataFrame(rows)
     places=[]
     for place,coords in LOCATIONS.items():

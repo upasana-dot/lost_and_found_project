@@ -1,12 +1,13 @@
 import logging, re
 from datetime import datetime
+from math import asin, cos, radians, sin, sqrt
 from rapidfuzz import fuzz
 from rapidfuzz.distance import Levenshtein
 
 log = logging.getLogger(__name__)
 WEIGHTS = {"category": .25, "colour": .15, "brand": .10, "location": .15, "time": .10, "description": .25}
-CATEGORY_SYNONYMS = {"bottle":"Bottle","flask":"Bottle","sipper":"Bottle","tumbler":"Bottle","water bottle":"Bottle","id":"ID Card","id card":"ID Card","identity card":"ID Card","charger":"Charger","adapter":"Charger","cable":"Charger","bag":"Bag","backpack":"Bag","rucksack":"Bag","hoodie":"Clothing","jacket":"Clothing","sweatshirt":"Clothing","notebook":"Notebook","wallet":"Wallet","keys":"Keys","key":"Keys"}
-COLOUR_GROUPS = [{"navy","dark blue","blue","sky blue"},{"black","dark black","charcoal"},{"grey","gray","silver"},{"white","off-white","cream"},{"red","maroon"},{"green","dark green"}]
+CATEGORY_SYNONYMS = {"water bottle":"Bottle","bottle":"Bottle","flask":"Bottle","sipper":"Bottle","tumbler":"Bottle","identity card":"ID Card","id card":"ID Card","id":"ID Card","charger":"Charger","adapter":"Charger","cable":"Charger","backpack":"Bag","rucksack":"Bag","bag":"Bag","sweatshirt":"Clothing","hoodie":"Clothing","hoddie":"Clothing","jacket":"Clothing","ballpoint pen":"Stationery","ball pen":"Stationery","highlighter":"Stationery","marker":"Stationery","pencil":"Stationery","pen":"Stationery","stationery":"Stationery","notebook":"Notebook","wallet":"Wallet","keys":"Keys","key":"Keys"}
+COLOUR_GROUPS = [{"navy","dark blue","blue","sky blue","light blue"},{"black","dark black","charcoal"},{"grey","gray","silver"},{"white","off-white","cream"},{"red","maroon"},{"green","dark green"}]
 NEARBY = {"Library":{"Computer Lab"},"Computer Lab":{"Library"},"Canteen":{"Auditorium"},"Auditorium":{"Canteen"}}
 try:
     from sentence_transformers import SentenceTransformer
@@ -18,7 +19,7 @@ except Exception as exc:
 def normalize_category(item):
     s = re.sub(r"[^a-z0-9 ]", " ", (item or "").lower()).strip()
     for phrase, category in sorted(CATEGORY_SYNONYMS.items(), key=lambda x: -len(x[0])):
-        if phrase in s: return category
+        if re.search(rf"\b{re.escape(phrase)}\b", s): return category
     return "Other"
 
 def _text(r): return " ".join(str(r.get(k) or "") for k in ("item","colour","brand","description"))
@@ -40,15 +41,31 @@ def _date(v):
 
 def _hours(a,b): return abs((_date(a["time"])-_date(b["time"])).total_seconds())/3600
 
+def _distance_m(a,b):
+    if any(a.get(k) is None or b.get(k) is None for k in ("latitude","longitude")): return None
+    lat1,lat2=radians(float(a["latitude"])),radians(float(b["latitude"]))
+    dlat=lat2-lat1;dlon=radians(float(b["longitude"])-float(a["longitude"]))
+    h=sin(dlat/2)**2+cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return 6371000*2*asin(sqrt(h))
+
 def score_pair(a,b):
-    ca,cb = normalize_category(a.get("category") or a.get("item")),normalize_category(b.get("category") or b.get("item"))
+    # Re-normalize the item text so older reports saved as "Other" benefit from new synonyms too.
+    ca,cb = normalize_category(a.get("item") or a.get("category")),normalize_category(b.get("item") or b.get("category"))
     cat = 1.0 if ca==cb and ca!="Other" else (0.5 if {ca,cb} in ({"Charger","Electronics"},) else 0.0)
     c1,c2 = (a.get("colour") or "").lower().strip(),(b.get("colour") or "").lower().strip()
     colour = 1.0 if c1==c2 else (.8 if any(c1 in g and c2 in g for g in COLOUR_GROUPS) else 0.0)
     br1,br2=(a.get("brand") or "").strip(),(b.get("brand") or "").strip()
     brand = .5 if not br1 or not br2 else (1.0 if fuzz.ratio(br1.lower(),br2.lower())>=85 else 0.0)
     p1,p2=a.get("place"),b.get("place")
-    location=1.0 if p1==p2 else (.4 if p2 in NEARBY.get(p1,set()) else 0.0)
+    b1,b2=(a.get("building") or "").strip().lower(),(b.get("building") or "").strip().lower()
+    n1,n2=(a.get("location_name") or "").strip().lower(),(b.get("location_name") or "").strip().lower()
+    distance=_distance_m(a,b)
+    if b1 and b1==b2: location=1.0
+    elif n1 and n1==n2: location=1.0
+    elif distance is not None and distance<=60: location=1.0
+    elif distance is not None and distance<=150: location=.8
+    elif distance is not None and distance<=300: location=.5
+    else: location=1.0 if p1==p2 else (.4 if p2 in NEARBY.get(p1,set()) else 0.0)
     h=_hours(a,b); time=1 if h<=2 else .7 if h<=24 else .4 if h<=72 else .2 if h<=168 else 0
     desc=_desc(a,b)
     parts={"category":cat,"colour":colour,"brand":brand,"location":location,"time":time,"description":desc}
@@ -58,7 +75,7 @@ def score_pair(a,b):
     reasons.append(f"Same category: {ca}" if cat==1 else f"Category similarity: {ca} / {cb}" if cat else f"Different categories: {ca} / {cb}")
     if colour: reasons.append(f"Same colour: {c1.title()}" if colour==1 else f"Colour similar: {c1.title()} ~ {c2.title()}")
     if brand==1: reasons.append(f"Same brand: {br1}")
-    if location: reasons.append(f"Same place: {p1}" if location==1 else f"Nearby places: {p1} / {p2}")
+    if location: reasons.append(f"Same building: {a.get('building')}" if b1 and b1==b2 else f"Same place: {p1}" if location==1 else f"Nearby places: {p1} / {p2}")
     reasons.append(f"Reported within {h:.0f} hours")
     label="High probability match" if score>=80 else "Possible match" if score>=60 else "Weak match" if score>=40 else None
     return score,parts,label,reasons
